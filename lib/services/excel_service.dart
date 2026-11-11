@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import '../db/database_helper.dart';
 import '../models/inventory_item.dart';
 import '../utils/format.dart';
+import 'photo_service.dart';
 
 const kExcelHeaders = [
   '품목',
@@ -24,8 +25,13 @@ const kExcelHeaders = [
 
 class ImportResult {
   final int inserted;
+  final int replaced; // 교체로 삭제된 기존 물품 수
   final List<String> errors;
-  const ImportResult({required this.inserted, required this.errors});
+  const ImportResult({
+    required this.inserted,
+    this.replaced = 0,
+    required this.errors,
+  });
 }
 
 class ExcelService {
@@ -114,6 +120,9 @@ class ExcelService {
         i.placeSmall,
       ];
 
+  /// 엑셀 파일을 가져온다 (교체 모드).
+  /// 기존 물품을 모두 삭제하고 엑셀 내용으로 등록하며,
+  /// 유효한 행이 없으면 기존 정보를 유지한다.
   static Future<ImportResult> importFromPicker() async {
     final picked = await FilePicker.pickFiles(
       type: FileType.custom,
@@ -127,7 +136,7 @@ class ExcelService {
     final bytes = await File(path).readAsBytes();
     final excel = Excel.decodeBytes(bytes);
     final errors = <String>[];
-    var inserted = 0;
+    final items = <InventoryItem>[];
     final db = DatabaseHelper.instance;
 
     for (final tableName in excel.tables.keys) {
@@ -164,7 +173,7 @@ class ExcelService {
         }
 
         final now = DateTime.now().millisecondsSinceEpoch;
-        final item = InventoryItem(
+        items.add(InventoryItem(
           itemName: name,
           category: cell(1),
           quantity: int.tryParse(cell(2)) ?? 1,
@@ -176,22 +185,37 @@ class ExcelService {
           placeSmall: cell(8),
           createdAt: now,
           updatedAt: now,
-        );
-        try {
-          await db.insertItem(item);
-          await db.ensureMaster('item', item.itemName);
-          await db.ensureMaster('category', item.category);
-          await db.ensureMaster('floor', item.floor);
-          await db.ensureMaster('place_large', item.placeLarge);
-          await db.ensureMaster('place_medium', item.placeMedium);
-          await db.ensureMaster('place_small', item.placeSmall);
-          inserted++;
-        } catch (e) {
-          errors.add('${item.itemName}: 저장 실패 ($e)');
-        }
+        ));
       }
     }
-    return ImportResult(inserted: inserted, errors: errors);
+
+    // 유효한 행이 없으면 기존 정보를 유지한다 (전면 삭제 방지)
+    if (items.isEmpty) {
+      return ImportResult(
+        inserted: 0,
+        errors: ['가져올 데이터가 없어 기존 정보를 유지했습니다', ...errors],
+      );
+    }
+
+    // 교체 모드: 기존 물품과 첨부된 사진을 삭제하고 엑셀 내용으로 등록한다
+    final before = await db.allItems();
+    final replaced = await db.replaceAllItems(items);
+    for (final old in before) {
+      await PhotoService.deleteFile(old.photoPath);
+    }
+    for (final item in items) {
+      await db.ensureMaster('item', item.itemName);
+      await db.ensureMaster('category', item.category);
+      await db.ensureMaster('floor', item.floor);
+      await db.ensureMaster('place_large', item.placeLarge);
+      await db.ensureMaster('place_medium', item.placeMedium);
+      await db.ensureMaster('place_small', item.placeSmall);
+    }
+    return ImportResult(
+      inserted: items.length,
+      replaced: replaced,
+      errors: errors,
+    );
   }
 
   static String? _normalizeDate(String s) {

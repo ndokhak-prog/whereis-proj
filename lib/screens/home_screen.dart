@@ -219,7 +219,50 @@ class _HomeScreenState extends State<HomeScreen> {
     await _importExcel();
   }
 
+  /// 교체 모드 가져오기 전 확인 대화상자 (주의 문구 + 취소)
+  Future<bool> _confirmReplaceImport() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('가져오기 확인'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '가져오기를 실행하면 기존에 등록된 물품 정보가 모두 삭제되고 '
+              '엑셀 파일의 내용으로 교체됩니다.',
+            ),
+            SizedBox(height: 8),
+            Text('물품에 첨부된 사진도 함께 삭제되며 되돌릴 수 없습니다.'),
+            SizedBox(height: 8),
+            Text(
+              '기존 정보가 필요하면 먼저 엑셀 내보내기로 백업하세요.',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('교체'),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
   Future<void> _importExcel() async {
+    final confirmed = await _confirmReplaceImport();
+    if (!confirmed || !mounted) return;
     try {
       final result = await ExcelService.importFromPicker();
       if (!mounted || (result.inserted == 0 && result.errors.isEmpty)) {
@@ -238,7 +281,9 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('${result.inserted}건이 등록되었습니다'),
+                Text(result.replaced > 0
+                    ? '기존 ${result.replaced}건을 삭제하고 ${result.inserted}건을 등록했습니다'
+                    : '${result.inserted}건이 등록되었습니다'),
                 if (result.errors.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(

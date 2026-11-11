@@ -360,6 +360,7 @@ void main() {
   });
 
   testWidgets('06 일괄등록(엑셀) 바텀시트', (tester) async {
+    await _seedItems();
     await _pumpApp(tester);
 
     await tester.tap(find.byTooltip('일괄등록'));
@@ -367,6 +368,16 @@ void main() {
     expect(find.text('엑셀 양식 파일 받기'), findsOneWidget);
     expect(find.text('엑셀 파일 가져오기'), findsOneWidget);
     await _golden(tester, '12_import_sheet');
+
+    // 교체 모드: 주의 대화상자에서 취소하면 기존 정보가 유지된다
+    await tester.tap(find.text('엑셀 파일 가져오기'));
+    await tester.pumpAndSettle();
+    expect(find.text('가져오기 확인'), findsOneWidget);
+    expect(find.textContaining('모두 삭제되고'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, '취소'));
+    await tester.pumpAndSettle();
+    expect(find.text('가져오기 확인'), findsNothing);
+    expect(await DatabaseHelper.instance.countItems(), 3);
 
     await tester.tapAt(const Offset(206, 150));
     await tester.pumpAndSettle();
@@ -471,5 +482,42 @@ void main() {
     final left = await DatabaseHelper.instance.searchItems();
     expect(left.length, 1);
     expect(left.first.itemName, '에어컨 필터');
+  });
+
+  test('10 물품 전체 교체(교체 모드)', () async {
+    await _seedItems();
+    final db = DatabaseHelper.instance;
+    expect(await db.countItems(), 3);
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final deleted = await db.replaceAllItems([
+      InventoryItem(
+        itemName: '새 품목 A',
+        floor: '1층',
+        placeLarge: '주방',
+        quantity: 2,
+        createdAt: now,
+        updatedAt: now,
+      ),
+      InventoryItem(
+        itemName: '새 품목 B',
+        floor: '2층',
+        placeLarge: '큰방',
+        quantity: 1,
+        createdAt: now,
+        updatedAt: now,
+      ),
+    ]);
+
+    expect(deleted, 3);
+    expect(await db.countItems(), 2);
+    expect(await db.searchItems(itemName: '김치'), isEmpty);
+
+    final names = (await db.searchItems()).map((e) => e.itemName).toSet();
+    expect(names, {'새 품목 A', '새 품목 B'});
+
+    // 마스터(드롭다운) 목록은 교체 후에도 유지된다
+    expect(await db.masterNames('floor'), contains('2층'));
+    expect(await db.masterNames('item'), contains('에어컨 필터'));
   });
 }

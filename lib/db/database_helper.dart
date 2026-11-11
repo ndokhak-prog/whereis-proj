@@ -210,6 +210,20 @@ class DatabaseHelper {
     await db.delete('items');
   }
 
+  /// 기존 물품을 모두 삭제하고 새 목록으로 교체한다 (한 트랜잭션으로 처리).
+  /// 반환값: 교체되어 삭제된 기존 물품 수
+  Future<int> replaceAllItems(List<InventoryItem> items) async {
+    final db = await database;
+    var deleted = 0;
+    await db.transaction((txn) async {
+      deleted = await txn.delete('items');
+      for (final item in items) {
+        await txn.insert('items', item.toMap()..remove('id'));
+      }
+    });
+    return deleted;
+  }
+
   Future<List<InventoryItem>> searchItems({
     String itemName = '',
     String category = '',
