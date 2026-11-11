@@ -180,6 +180,16 @@ void main() {
     await tester.tap(find.byType(TextFormField).at(2));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
+    // 달력을 항상 고정된 달(2020년 1월)로 이동시킨 뒤 골든을 찍는다.
+    // 그렇지 않으면 달력 UI와 선택 결과가 테스트를 실행한 시점의
+    // 년/월에 따라 달라져 시간이 지나면(달이 바뀌면) 실패하게 된다.
+    final now = DateTime.now();
+    final monthsBack = (now.year - 2020) * 12 + (now.month - 1);
+    final prevMonth = find.byIcon(Icons.chevron_left);
+    for (var i = 0; i < monthsBack; i++) {
+      await tester.tap(prevMonth);
+      await tester.pumpAndSettle();
+    }
     await _golden(tester, '03_date_picker', keepFocus: true);
     await tester.tap(find.text('15').last);
     await tester.pumpAndSettle();
@@ -254,7 +264,7 @@ void main() {
     expect(find.text('에어컨 필터'), findsWidgets);
     expect(find.text('김치'), findsOneWidget);
     expect(find.text('세탁세제'), findsOneWidget);
-    expect(find.text('2026.10.15'), findsOneWidget);
+    expect(find.text('2020.01.15'), findsOneWidget);
 
     final db = DatabaseHelper.instance;
     expect(await db.countItems(), 3);
