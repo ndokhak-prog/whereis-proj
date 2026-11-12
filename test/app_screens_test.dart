@@ -180,9 +180,9 @@ void main() {
     await tester.tap(find.byType(TextFormField).at(2));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    // 달력을 항상 고정된 달(2020년 1월)로 이동시킨 뒤 골든을 찍는다.
-    // 그렇지 않으면 달력 UI와 선택 결과가 테스트를 실행한 시점의
-    // 년/월에 따라 달라져 시간이 지나면(달이 바뀌면) 실패하게 된다.
+    // 달력을 항상 고정된 달(2020년 1월)로 이동해 15일을 선택한 뒤 골든을
+    // 찍는다. 달력 그리드뿐 아니라 대화상자 헤더(처음 선택된 날짜)까지
+    // 실행 시점의 날짜에 영향받지 않아야 골든이 안정적으로 유지된다.
     final now = DateTime.now();
     final monthsBack = (now.year - 2020) * 12 + (now.month - 1);
     final prevMonth = find.byIcon(Icons.chevron_left);
@@ -190,9 +190,9 @@ void main() {
       await tester.tap(prevMonth);
       await tester.pumpAndSettle();
     }
-    await _golden(tester, '03_date_picker', keepFocus: true);
     await tester.tap(find.text('15').last);
     await tester.pumpAndSettle();
+    await _golden(tester, '03_date_picker', keepFocus: true);
     await tester.tap(find.text('확인'));
     await tester.pump();
     _unfocus(tester);
