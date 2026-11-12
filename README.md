@@ -48,3 +48,12 @@ run_tests.bat --update-goldens
 
 날짜 선택 화면의 골든(`03_date_picker.png`)은 달력을 항상 고정된 달
 (2020년 1월)로 이동시킨 뒤 촬영하므로 실행 시점과 무관하게 안정하다.
+
+## 배포 (APK)
+
+- GitHub Releases에 APK를 첨부해 배포한다 (디버그 빌드는 prerelease로 표시).
+- **APK 파일명은 항상 `ndokhak_udiso_`로 시작한다.**
+  - 디버그: `ndokhak_udiso_debug_<yyyyMMdd>.apk` (릴리스 태그: `debug-<yyyyMMdd>`)
+  - 릴리스: `ndokhak_udiso_release_<버전>.apk`
+- 빌드 방법: `flutter build apk --debug` / `flutter build apk --release`
+
