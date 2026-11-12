@@ -201,11 +201,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (action == null || !mounted) return;
     if (action == 'template') {
       try {
-        final path = await ExcelService.exportTemplate();
+        final name = await ExcelService.exportTemplate();
         if (mounted) {
-          final name = path.split(Platform.pathSeparator).last;
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('양식 저장됨: $name')),
+            SnackBar(
+              content: Text(
+                  name == null ? '양식 저장이 취소되었습니다' : '양식 저장됨: $name'),
+            ),
           );
         }
       } catch (e) {
@@ -322,11 +324,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _exportExcel() async {
     try {
-      final path = await ExcelService.exportAll();
+      final name = await ExcelService.exportAll();
       if (mounted) {
-        final name = path.split(Platform.pathSeparator).last;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('내보내기 저장됨: $name')),
+          SnackBar(
+            content: Text(
+                name == null ? '내보내기가 취소되었습니다' : '내보내기 저장됨: $name'),
+          ),
         );
       }
     } catch (e) {

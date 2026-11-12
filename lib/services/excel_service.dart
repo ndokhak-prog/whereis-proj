@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:path/path.dart' as p;
 
 import '../db/database_helper.dart';
 import '../models/inventory_item.dart';
@@ -35,27 +34,7 @@ class ImportResult {
 }
 
 class ExcelService {
-  static Future<String?> _saveWithPicker(String fileName, List<int> bytes) async {
-    try {
-      // ignore: undefined_getter
-      final dynamic fp = FilePicker;
-      // ignore: undefined_getter
-      final dynamic platform = fp.platform;
-      final dynamic result = await platform.saveFile(
-        dialogTitle: '저장 위치 선택',
-        fileName: fileName,
-        type: FileType.custom,
-        allowedExtensions: const ['xlsx'],
-        bytes: Uint8List.fromList(bytes),
-      );
-      if (result == null) return null;
-      return result.toString();
-    } catch (e) {
-      return null;
-    }
-  }
-
-  static Future<String> _saveWorkbook(
+  static Future<String?> _saveWorkbook(
     List<List<dynamic>> rows,
     String fileName,
   ) async {
@@ -71,25 +50,22 @@ class ExcelService {
     }
     excel.delete('Sheet1');
     final bytes = excel.encode() ?? [];
-    final savedPath = await _saveWithPicker(fileName, bytes);
-    if (savedPath != null && savedPath.isNotEmpty) {
-      return savedPath;
-    }
-    String targetPath;
-    if (Platform.isAndroid) {
-      final dir = Directory('/storage/emulated/0/Download');
-      if (!await dir.exists()) {
-        await dir.create(recursive: true);
-      }
-      targetPath = p.join(dir.path, fileName);
-    } else {
-      targetPath = p.join(Directory.current.path, fileName);
-    }
-    await File(targetPath).writeAsBytes(bytes, flush: true);
-    return targetPath;
+    // 저장 위치는 시스템 '다른 이름으로 저장' 대화상자로 선택한다
+    // (Android는 SAF). bytes를 함께 넘기면 플러그인이 선택된 위치에 직접
+    // 기록하므로 저장소 권한이 필요 없다. 파일 경로를 직접 만들어 쓰면
+    // Android 10+ 스코프드 스토리지에서 'Permission denied, errno=13'이 난다.
+    // 성공 시 저장된 파일명을, 사용자가 취소하면 null을 반환한다.
+    final saved = await FilePicker.saveFile(
+      dialogTitle: '저장 위치 선택',
+      fileName: fileName,
+      type: FileType.custom,
+      allowedExtensions: const ['xlsx'],
+      bytes: Uint8List.fromList(bytes),
+    );
+    return saved == null ? null : fileName;
   }
 
-  static Future<String> exportTemplate() async {
+  static Future<String?> exportTemplate() async {
     final rows = [
       kExcelHeaders,
       ['생수', '기타', '2', '2027-12-31', '리필용', '1층', '주방', '팬트리', '바닥'],
@@ -98,7 +74,7 @@ class ExcelService {
     return _saveWorkbook(rows, 'udiso_template.xlsx');
   }
 
-  static Future<String> exportAll() async {
+  static Future<String?> exportAll() async {
     final items = await DatabaseHelper.instance.allItems();
     final rows = [
       kExcelHeaders,
