@@ -7,6 +7,7 @@ import '../db/database_helper.dart';
 import '../models/inventory_item.dart';
 import '../services/excel_service.dart';
 import '../services/photo_service.dart';
+import '../utils/error_utils.dart';
 import '../utils/format.dart';
 import 'batch_edit_screen.dart';
 import 'item_edit_screen.dart';
@@ -201,19 +202,19 @@ class _HomeScreenState extends State<HomeScreen> {
     if (action == null || !mounted) return;
     if (action == 'template') {
       try {
-        final name = await ExcelService.exportTemplate();
+        final saved = await ExcelService.exportTemplate();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                  name == null ? '양식 저장이 취소되었습니다' : '양식 저장됨: $name'),
+                  '양식 저장됨\n파일명: ${saved.name}\n경로: ${saved.path}'),
             ),
           );
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text('양식 생성 실패: $e')));
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('양식 생성 실패: ${errorText(e)}')));
         }
       }
       return;
@@ -283,6 +284,13 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (result.sourceName != null) ...[
+                  Text('가져온 파일: ${result.sourceName}',
+                      style: Theme.of(ctx).textTheme.titleSmall),
+                  Text(result.sourcePath ?? '',
+                      style: Theme.of(ctx).textTheme.bodySmall),
+                  const SizedBox(height: 8),
+                ],
                 Text(result.replaced > 0
                     ? '기존 ${result.replaced}건을 삭제하고 ${result.inserted}건을 등록했습니다'
                     : '${result.inserted}건이 등록되었습니다'),
@@ -314,29 +322,30 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       );
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('가져오기 실패: $e\n$st');
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('가져오기 실패: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('가져오기 실패: ${errorText(e)}')));
       }
     }
   }
 
   Future<void> _exportExcel() async {
     try {
-      final name = await ExcelService.exportAll();
+      final saved = await ExcelService.exportAll();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-                name == null ? '내보내기가 취소되었습니다' : '내보내기 저장됨: $name'),
+                '내보내기 저장됨\n파일명: ${saved.name}\n경로: ${saved.path}'),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('내보내기 실패: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('내보내기 실패: ${errorText(e)}')));
       }
     }
   }

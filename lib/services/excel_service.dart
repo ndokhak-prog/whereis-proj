@@ -1,9 +1,11 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../db/database_helper.dart';
 import '../models/inventory_item.dart';
@@ -22,19 +24,52 @@ const kExcelHeaders = [
   '장소3',
 ];
 
+/// 저장된 엑셀 파일 정보 (실제 파일 경로 + 파일명)
+typedef SavedFile = ({String path, String name});
+
+/// 엑셀 파일 자체의 문제(형식 오류 등)를 사용자에게 알리기 위한 예외
+class ExcelImportException implements Exception {
+  final String message;
+  const ExcelImportException(this.message);
+  @override
+  String toString() => message;
+}
+
 class ImportResult {
   final int inserted;
   final int replaced; // 교체로 삭제된 기존 물품 수
   final List<String> errors;
+  final String? sourceName; // 가져온 파일명
+  final String? sourcePath; // 가져온 파일 경로
   const ImportResult({
     required this.inserted,
     this.replaced = 0,
     required this.errors,
+    this.sourceName,
+    this.sourcePath,
   });
 }
 
 class ExcelService {
-  static Future<String?> _saveWorkbook(
+  /// 저장 폴더로 앱 전용 폴더를 사용한다.
+  /// 안드로이드에서는 앱 전용 외부 저장소(Android/data/<패키지>/files)라
+  /// 저장소 권한 없이 쓸 수 있고 실제 파일 경로를 알 수 있다.
+  static Future<Directory> _saveDir() async {
+    Directory base;
+    try {
+      base = (await getExternalStorageDirectory()) ??
+          await getApplicationDocumentsDirectory();
+    } catch (_) {
+      base = await getApplicationDocumentsDirectory();
+    }
+    final dir = Directory(p.join(base.path, 'udiso'));
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
+  static Future<SavedFile> _saveWorkbook(
     List<List<dynamic>> rows,
     String fileName,
   ) async {
@@ -50,38 +85,29 @@ class ExcelService {
     }
     excel.delete('Sheet1');
     final bytes = excel.encode() ?? [];
-    // 저장 위치는 시스템 '다른 이름으로 저장' 대화상자로 선택한다
-    // (Android는 SAF). bytes를 함께 넘기면 플러그인이 선택된 위치에 직접
-    // 기록하므로 저장소 권한이 필요 없다. 파일 경로를 직접 만들어 쓰면
-    // Android 10+ 스코프드 스토리지에서 'Permission denied, errno=13'이 난다.
-    // 성공 시 저장된 파일명을, 사용자가 취소하면 null을 반환한다.
-    final saved = await FilePicker.saveFile(
-      dialogTitle: '저장 위치 선택',
-      fileName: fileName,
-      type: FileType.custom,
-      allowedExtensions: const ['xlsx'],
-      bytes: Uint8List.fromList(bytes),
-    );
-    return saved == null ? null : fileName;
+    final dir = await _saveDir();
+    final file = File(p.join(dir.path, fileName));
+    await file.writeAsBytes(bytes, flush: true);
+    return (path: file.path, name: fileName);
   }
 
-  static Future<String?> exportTemplate() async {
+  static Future<SavedFile> exportTemplate() async {
     final rows = [
       kExcelHeaders,
       ['생수', '기타', '2', '2027-12-31', '리필용', '1층', '주방', '팬트리', '바닥'],
       ['청소기 필터', '인테리어', '1', '', '6개월마다 교체', '발코니', '', '', '수납장'],
     ];
-    return _saveWorkbook(rows, 'udiso_template.xlsx');
+    return _saveWorkbook(rows, 'ndokhak_udiso_template.xlsx');
   }
 
-  static Future<String?> exportAll() async {
+  static Future<SavedFile> exportAll() async {
     final items = await DatabaseHelper.instance.allItems();
     final rows = [
       kExcelHeaders,
       ...items.map(_toRow),
     ];
     final stamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-    return _saveWorkbook(rows, 'udiso_$stamp.xlsx');
+    return _saveWorkbook(rows, 'ndokhak_udiso_$stamp.xlsx');
   }
 
   static List<dynamic> _toRow(InventoryItem i) => [
@@ -104,16 +130,33 @@ class ExcelService {
       type: FileType.custom,
       allowedExtensions: ['xlsx'],
     );
-    final path = picked?.files.single.path;
+    final pickedFile = picked?.files.single;
+    final path = pickedFile?.path;
     if (path == null) {
       return const ImportResult(inserted: 0, errors: []);
     }
 
-    final bytes = await File(path).readAsBytes();
-    final excel = Excel.decodeBytes(bytes);
+    final List<int> bytes;
+    try {
+      bytes = await File(path).readAsBytes();
+    } catch (e) {
+      debugPrint('엑셀 파일 읽기 실패: $e');
+      throw const ExcelImportException('선택한 파일을 읽을 수 없습니다');
+    }
+
+    final Excel excel;
+    try {
+      excel = Excel.decodeBytes(bytes);
+    } catch (e) {
+      debugPrint('엑셀 디코드 실패: $e');
+      throw const ExcelImportException(
+          '엑셀 파일을 읽을 수 없습니다. .xlsx 형식인지 확인하세요');
+    }
     final errors = <String>[];
     final items = <InventoryItem>[];
     final db = DatabaseHelper.instance;
+    final sourceName = pickedFile?.name ?? p.basename(path);
+    final sourcePath = path;
 
     for (final tableName in excel.tables.keys) {
       final table = excel.tables[tableName]!;
@@ -147,6 +190,11 @@ class ExcelService {
           errors.add('${r + 1}행: 품목이 비어 있어 제외됨');
           continue;
         }
+        final placeLarge = cell(6);
+        if (placeLarge.isEmpty) {
+          errors.add('${r + 1}행: 장소1이 비어 있어 제외됨');
+          continue;
+        }
 
         final now = DateTime.now().millisecondsSinceEpoch;
         items.add(InventoryItem(
@@ -156,7 +204,7 @@ class ExcelService {
           expiryDate: _normalizeDate(cell(3)),
           note: cell(4),
           floor: cell(5),
-          placeLarge: cell(6),
+          placeLarge: placeLarge,
           placeMedium: cell(7),
           placeSmall: cell(8),
           createdAt: now,
@@ -170,6 +218,8 @@ class ExcelService {
       return ImportResult(
         inserted: 0,
         errors: ['가져올 데이터가 없어 기존 정보를 유지했습니다', ...errors],
+        sourceName: sourceName,
+        sourcePath: sourcePath,
       );
     }
 
@@ -191,6 +241,8 @@ class ExcelService {
       inserted: items.length,
       replaced: replaced,
       errors: errors,
+      sourceName: sourceName,
+      sourcePath: sourcePath,
     );
   }
 

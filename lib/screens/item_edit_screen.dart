@@ -3,10 +3,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
 
 import '../db/database_helper.dart';
 import '../models/inventory_item.dart';
 import '../services/photo_service.dart';
+import '../utils/error_utils.dart';
 import '../utils/format.dart';
 import '../widgets/master_dropdown.dart';
 import 'manage_list_screen.dart';
@@ -134,7 +136,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('사진 등록 실패: $e')));
+            .showSnackBar(SnackBar(content: Text('사진 등록 실패: ${errorText(e)}')));
       }
     }
   }
@@ -378,6 +380,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
                   child: MasterDropdown(
                     listType: 'place_large',
                     label: '장소1',
+                    required: true,
                     value: _placeLarge,
                     hint: '예: 큰방, 발코니, 창고',
                     onChanged: (v) => setState(() => _placeLarge = v),
@@ -555,6 +558,13 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
                 ),
               ],
             ),
+            if (_photoPath != null) ...[
+              const SizedBox(height: 8),
+              SelectableText(
+                '파일명: ${p.basename(_photoPath!)}\n경로: ${_photoPath!}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
             const SizedBox(height: 24),
             Row(
               children: [

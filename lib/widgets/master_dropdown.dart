@@ -91,6 +91,9 @@ class _MasterDropdownState extends State<MasterDropdown> {
         isDense: true,
       ),
       hint: Text(widget.hint ?? '${widget.label} 선택', overflow: TextOverflow.ellipsis),
+      validator: widget.required
+          ? (v) => (v == null || v.isEmpty) ? '${widget.label}을 선택하세요' : null
+          : null,
       items: items
           .map((n) => DropdownMenuItem(
                 value: n,
