@@ -173,6 +173,9 @@ void main() {
     await tester.tap(find.widgetWithText(FloatingActionButton, '등록'));
     await tester.pumpAndSettle();
     expect(find.text('등록'), findsOneWidget);
+    // 사진이 없어도 저장경로·파일명 항목은 항상 표시된다
+    expect(find.text('사진 저장경로 및 파일명'), findsOneWidget);
+    expect(find.text('등록된 사진 없음'), findsOneWidget);
     await _golden(tester, '02_item_edit_new');
 
     await tester.enterText(find.byType(TextFormField).at(0), '에어컨 필터');
@@ -588,5 +591,30 @@ void main() {
     expect(result.inserted, 0);
     expect(result.errors.first, contains('기존 정보를 유지'));
     expect(await DatabaseHelper.instance.countItems(), 3);
+  });
+
+  test('13 엑셀 가져오기: 사진 경로·파일명 반영', () async {
+    final dir = await Directory.systemTemp.createTemp('udiso_photo_test');
+    final photo = File(p.join(dir.path, 'photo_test.jpg'));
+    await photo.writeAsBytes([1, 2, 3]);
+
+    final bytes = _buildXlsx([
+      kExcelHeaders,
+      ['사진있음', '기타', '1', '', '', '1층', '주방', '', '', photo.path, 'photo_test.jpg'],
+      ['사진없음', '기타', '1', '', '', '1층', '주방', '', '', '/no/such/photo.jpg', 'photo.jpg'],
+    ]);
+
+    final result = await ExcelService.importFromBytes(bytes);
+
+    expect(result.inserted, 2);
+    expect(result.photoMissing, 1); // 없는 경로는 사진 없이 등록
+
+    final items = await DatabaseHelper.instance.searchItems();
+    expect(items.firstWhere((e) => e.itemName == '사진있음').photoPath,
+        photo.path);
+    expect(
+        items.firstWhere((e) => e.itemName == '사진없음').photoPath, isNull);
+
+    await dir.delete(recursive: true);
   });
 }

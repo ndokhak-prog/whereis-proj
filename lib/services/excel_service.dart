@@ -23,6 +23,8 @@ const kExcelHeaders = [
   '장소1',
   '장소2',
   '장소3',
+  '사진경로',
+  '사진파일명',
 ];
 
 /// 저장된 엑셀 파일 정보 (실제 파일 경로 + 파일명)
@@ -42,12 +44,14 @@ class ImportResult {
   final List<String> errors;
   final String? sourceName; // 가져온 파일명
   final String? sourcePath; // 가져온 파일 경로
+  final int photoMissing; // 사진 파일을 찾지 못해 사진 없이 등록된 건수
   const ImportResult({
     required this.inserted,
     this.replaced = 0,
     required this.errors,
     this.sourceName,
     this.sourcePath,
+    this.photoMissing = 0,
   });
 }
 
@@ -103,8 +107,8 @@ class ExcelService {
   static Future<SavedFile?> exportTemplate({bool chooseFolder = false}) async {
     final rows = [
       kExcelHeaders,
-      ['생수', '기타', '2', '2027-12-31', '리필용', '1층', '주방', '팬트리', '바닥'],
-      ['청소기 필터', '인테리어', '1', '', '6개월마다 교체', '발코니', '', '', '수납장'],
+      ['생수', '기타', '2', '2027-12-31', '리필용', '1층', '주방', '팬트리', '바닥', '', ''],
+      ['청소기 필터', '인테리어', '1', '', '6개월마다 교체', '발코니', '', '', '수납장', '', ''],
     ];
     return _saveWorkbook(rows, 'ndokhak_udiso_template.xlsx',
         chooseFolder: chooseFolder);
@@ -131,6 +135,8 @@ class ExcelService {
         i.placeLarge,
         i.placeMedium,
         i.placeSmall,
+        i.photoPath ?? '',
+        i.photoPath == null ? '' : p.basename(i.photoPath!),
       ];
 
   /// 엑셀 파일을 골라 가져온다 (교체 모드).
@@ -194,6 +200,7 @@ class ExcelService {
     final errors = <String>[];
     final items = <InventoryItem>[];
     final db = DatabaseHelper.instance;
+    var photoMissing = 0;
 
     for (final tableName in excel.tables.keys) {
       final table = excel.tables[tableName]!;
@@ -234,6 +241,10 @@ class ExcelService {
         }
 
         final now = DateTime.now().millisecondsSinceEpoch;
+        // 사진은 엑셀에 적힌 경로가 이 기기에 실제로 있을 때만 연결한다.
+        final photoRaw = cell(9);
+        final photoPath = _existingPhoto(photoRaw);
+        if (photoRaw.isNotEmpty && photoPath == null) photoMissing++;
         items.add(InventoryItem(
           itemName: name,
           category: cell(1),
@@ -244,6 +255,7 @@ class ExcelService {
           placeLarge: placeLarge,
           placeMedium: cell(7),
           placeSmall: cell(8),
+          photoPath: photoPath,
           createdAt: now,
           updatedAt: now,
         ));
@@ -263,8 +275,14 @@ class ExcelService {
     // 교체 모드: 기존 물품과 첨부된 사진을 삭제하고 엑셀 내용으로 등록한다
     final before = await db.allItems();
     final replaced = await db.replaceAllItems(items);
+    // 새로 등록한 물품이 그대로 쓰는 사진은 지우지 않는다
+    final keepPhotos =
+        items.map((e) => e.photoPath).whereType<String>().toSet();
     for (final old in before) {
-      await PhotoService.deleteFile(old.photoPath);
+      final path = old.photoPath;
+      if (path != null && !keepPhotos.contains(path)) {
+        await PhotoService.deleteFile(path);
+      }
     }
     for (final item in items) {
       await db.ensureMaster('item', item.itemName);
@@ -280,7 +298,14 @@ class ExcelService {
       errors: errors,
       sourceName: sourceName,
       sourcePath: sourcePath,
+      photoMissing: photoMissing,
     );
+  }
+
+  /// 엑셀에 적힌 사진 경로가 이 기기에 실제로 있을 때만 그 경로를 돌려준다.
+  static String? _existingPhoto(String path) {
+    if (path.isEmpty) return null;
+    return File(path).existsSync() ? path : null;
   }
 
   static String? _normalizeDate(String s) {

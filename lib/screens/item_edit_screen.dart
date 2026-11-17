@@ -558,13 +558,18 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
                 ),
               ],
             ),
-            if (_photoPath != null) ...[
-              const SizedBox(height: 8),
-              SelectableText(
-                '파일명: ${p.basename(_photoPath!)}\n경로: ${_photoPath!}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
+            const SizedBox(height: 8),
+            Text(
+              '사진 저장경로 및 파일명',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+            SelectableText(
+              _photoPath == null
+                  ? '등록된 사진 없음'
+                  : '파일명: ${p.basename(_photoPath!)}\n경로: ${_photoPath!}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             const SizedBox(height: 24),
             Row(
               children: [

@@ -317,6 +317,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 Text(result.replaced > 0
                     ? '기존 ${result.replaced}건을 삭제하고 ${result.inserted}건을 등록했습니다'
                     : '${result.inserted}건이 등록되었습니다'),
+                if (result.photoMissing > 0)
+                  Text(
+                    '사진 파일을 찾을 수 없어 ${result.photoMissing}건은 사진 없이 등록했습니다',
+                    style: Theme.of(ctx).textTheme.bodySmall,
+                  ),
                 if (result.errors.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
