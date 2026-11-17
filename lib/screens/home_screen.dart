@@ -201,25 +201,48 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (action == null || !mounted) return;
     if (action == 'template') {
-      try {
-        final saved = await ExcelService.exportTemplate();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                  '양식 저장됨\n파일명: ${saved.name}\n경로: ${saved.path}'),
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('양식 생성 실패: ${errorText(e)}')));
-        }
-      }
+      await _saveTemplate();
       return;
     }
     await _importExcel();
+  }
+
+  /// 엑셀 양식 파일을 저장한다. [chooseFolder]가 true면 저장 위치를 고른다.
+  Future<void> _saveTemplate({bool chooseFolder = false}) => _saveExcelFile(
+        '양식',
+        () => ExcelService.exportTemplate(chooseFolder: chooseFolder),
+        onChooseFolder: () => _saveTemplate(chooseFolder: true),
+      );
+
+  /// 엑셀 양식 파일 저장 결과를 알려 준다.
+  Future<void> _saveExcelFile(
+    String label,
+    Future<SavedFile?> Function() run, {
+    required VoidCallback onChooseFolder,
+  }) async {
+    try {
+      final saved = await run();
+      if (!mounted) return;
+      if (saved == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$label 저장이 취소되었습니다')));
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 8),
+          content: Text('$label 저장됨\n파일명: ${saved.name}\n경로: ${saved.path}'),
+          action: SnackBarAction(
+            label: '다른 폴더',
+            onPressed: onChooseFolder,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$label 저장 실패: ${errorText(e)}')));
+    }
   }
 
   /// 교체 모드 가져오기 전 확인 대화상자 (주의 문구 + 취소)
@@ -331,24 +354,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _exportExcel() async {
-    try {
-      final saved = await ExcelService.exportAll();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                '내보내기 저장됨\n파일명: ${saved.name}\n경로: ${saved.path}'),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('내보내기 실패: ${errorText(e)}')));
-      }
-    }
-  }
+  /// 전체 물품을 엑셀로 내보낸다. [chooseFolder]가 true면 저장 위치를 고른다.
+  Future<void> _exportExcel({bool chooseFolder = false}) => _saveExcelFile(
+        '내보내기',
+        () => ExcelService.exportAll(chooseFolder: chooseFolder),
+        onChooseFolder: () => _exportExcel(chooseFolder: true),
+      );
 
   Future<void> _openYoutube() async {
     final uri = Uri.parse('https://www.youtube.com/@ndokhak');

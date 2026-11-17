@@ -3,13 +3,14 @@ import 'dart:io';
 import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 import '../db/database_helper.dart';
 import '../models/inventory_item.dart';
 import '../utils/format.dart';
+import 'file_gateway.dart';
 import 'photo_service.dart';
 
 const kExcelHeaders = [
@@ -51,28 +52,8 @@ class ImportResult {
 }
 
 class ExcelService {
-  /// 저장 폴더로 앱 전용 폴더를 사용한다.
-  /// 안드로이드에서는 앱 전용 외부 저장소(Android/data/<패키지>/files)라
-  /// 저장소 권한 없이 쓸 수 있고 실제 파일 경로를 알 수 있다.
-  static Future<Directory> _saveDir() async {
-    Directory base;
-    try {
-      base = (await getExternalStorageDirectory()) ??
-          await getApplicationDocumentsDirectory();
-    } catch (_) {
-      base = await getApplicationDocumentsDirectory();
-    }
-    final dir = Directory(p.join(base.path, 'udiso'));
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-    return dir;
-  }
-
-  static Future<SavedFile> _saveWorkbook(
-    List<List<dynamic>> rows,
-    String fileName,
-  ) async {
+  /// 워크북을 만들어 엑셀 바이트로 돌려준다.
+  static List<int> _encodeWorkbook(List<List<dynamic>> rows) {
     final excel = Excel.createExcel();
     final sheet = excel['보유목록'];
     for (var r = 0; r < rows.length; r++) {
@@ -84,30 +65,60 @@ class ExcelService {
       }
     }
     excel.delete('Sheet1');
-    final bytes = excel.encode() ?? [];
-    final dir = await _saveDir();
-    final file = File(p.join(dir.path, fileName));
-    await file.writeAsBytes(bytes, flush: true);
-    return (path: file.path, name: fileName);
+    return excel.encode() ?? [];
   }
 
-  static Future<SavedFile> exportTemplate() async {
+  /// 워크북을 저장하고 저장된 파일 정보를 돌려준다.
+  ///
+  /// [chooseFolder]가 false(기본)면 스마트폰에서 바로 볼 수 있는 '다운로드'
+  /// 폴더에 저장한다. true면 사용자가 저장 위치를 고르는 시스템 대화상자를
+  /// 띄우며, 기본 위치는 '다운로드'다. 사용자가 취소하면 null을 돌려준다.
+  static Future<SavedFile?> _saveWorkbook(
+    List<List<dynamic>> rows,
+    String fileName, {
+    bool chooseFolder = false,
+  }) async {
+    final bytes = _encodeWorkbook(rows);
+
+    if (!chooseFolder) {
+      // 안드로이드: MediaStore로 '다운로드' 폴더에 바로 저장 (저장소 권한 불필요)
+      final path = await FileGateway.saveToDownloads(fileName, bytes);
+      if (path != null) return (path: path, name: p.basename(path));
+    }
+
+    // 그 외 환경이거나 저장에 실패한 경우: 시스템 저장 대화상자(SAF)를 띄운다.
+    final saved = await FilePicker.saveFile(
+      dialogTitle: '저장 위치 선택 (기본: 다운로드)',
+      fileName: fileName,
+      initialDirectory:
+          Platform.isAndroid ? FileGateway.downloadsDocumentsUri : null,
+      type: FileType.custom,
+      allowedExtensions: const ['xlsx'],
+      bytes: Uint8List.fromList(bytes),
+    );
+    if (saved == null) return null; // 사용자가 저장을 취소
+    return (path: readableLocation(saved), name: fileName);
+  }
+
+  static Future<SavedFile?> exportTemplate({bool chooseFolder = false}) async {
     final rows = [
       kExcelHeaders,
       ['생수', '기타', '2', '2027-12-31', '리필용', '1층', '주방', '팬트리', '바닥'],
       ['청소기 필터', '인테리어', '1', '', '6개월마다 교체', '발코니', '', '', '수납장'],
     ];
-    return _saveWorkbook(rows, 'ndokhak_udiso_template.xlsx');
+    return _saveWorkbook(rows, 'ndokhak_udiso_template.xlsx',
+        chooseFolder: chooseFolder);
   }
 
-  static Future<SavedFile> exportAll() async {
+  static Future<SavedFile?> exportAll({bool chooseFolder = false}) async {
     final items = await DatabaseHelper.instance.allItems();
     final rows = [
       kExcelHeaders,
       ...items.map(_toRow),
     ];
     final stamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-    return _saveWorkbook(rows, 'ndokhak_udiso_$stamp.xlsx');
+    return _saveWorkbook(rows, 'ndokhak_udiso_$stamp.xlsx',
+        chooseFolder: chooseFolder);
   }
 
   static List<dynamic> _toRow(InventoryItem i) => [
@@ -122,18 +133,35 @@ class ExcelService {
         i.placeSmall,
       ];
 
-  /// 엑셀 파일을 가져온다 (교체 모드).
-  /// 기존 물품을 모두 삭제하고 엑셀 내용으로 등록하며,
-  /// 유효한 행이 없으면 기존 정보를 유지한다.
+  /// 엑셀 파일을 골라 가져온다 (교체 모드).
+  ///
+  /// 안드로이드에서는 '다운로드' 폴더에서 시작하는 파일 선택 창을 띄우고,
+  /// 그 외 환경에서는 file_picker를 사용한다.
+  /// 사용자가 취소하면 빈 결과(inserted 0, errors 없음)를 돌려준다.
   static Future<ImportResult> importFromPicker() async {
+    try {
+      final picked = await FileGateway.pickExcelFile();
+      if (picked == null) {
+        return const ImportResult(inserted: 0, errors: []); // 사용자가 취소
+      }
+      return importFromBytes(picked.bytes,
+          sourceName: picked.name, sourcePath: picked.location);
+    } on MissingPluginException {
+      // 네이티브 채널이 없는 환경(데스크톱/테스트)에서는 file_picker 사용
+    } on PlatformException catch (e) {
+      debugPrint('파일 선택 실패: $e');
+      throw ExcelImportException(e.message ?? '파일을 선택할 수 없습니다');
+    }
+
     final picked = await FilePicker.pickFiles(
+      dialogTitle: '엑셀 파일 선택',
       type: FileType.custom,
       allowedExtensions: ['xlsx'],
     );
     final pickedFile = picked?.files.single;
     final path = pickedFile?.path;
     if (path == null) {
-      return const ImportResult(inserted: 0, errors: []);
+      return const ImportResult(inserted: 0, errors: []); // 사용자가 취소
     }
 
     final List<int> bytes;
@@ -143,7 +171,18 @@ class ExcelService {
       debugPrint('엑셀 파일 읽기 실패: $e');
       throw const ExcelImportException('선택한 파일을 읽을 수 없습니다');
     }
+    return importFromBytes(bytes,
+        sourceName: pickedFile?.name ?? p.basename(path), sourcePath: path);
+  }
 
+  /// 엑셀 내용(바이트)으로 기존 물품을 모두 교체한다.
+  /// 품목과 장소1이 비어 있는 행은 제외하며, 유효한 행이 없으면 기존 정보를
+  /// 유지한다 (전면 삭제 방지).
+  static Future<ImportResult> importFromBytes(
+    List<int> bytes, {
+    String? sourceName,
+    String? sourcePath,
+  }) async {
     final Excel excel;
     try {
       excel = Excel.decodeBytes(bytes);
@@ -155,8 +194,6 @@ class ExcelService {
     final errors = <String>[];
     final items = <InventoryItem>[];
     final db = DatabaseHelper.instance;
-    final sourceName = pickedFile?.name ?? p.basename(path);
-    final sourcePath = path;
 
     for (final tableName in excel.tables.keys) {
       final table = excel.tables[tableName]!;

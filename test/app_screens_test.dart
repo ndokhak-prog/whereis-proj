@@ -1,5 +1,6 @@
 ﻿import 'dart:io';
 
+import 'package:excel/excel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +9,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:whereis/db/database_helper.dart';
 import 'package:whereis/main.dart';
 import 'package:whereis/models/inventory_item.dart';
+import 'package:whereis/services/excel_service.dart';
 
 const _materialFonts = r'C:\tools\flutter\bin\cache\artifacts\material_fonts';
 
@@ -113,6 +115,20 @@ Future<void> _seedItems() async {
       qty: 2, expiry: '2026-12-31', note: '거실 선반 위', category: '공구');
   await add('김치', '1층', '주방', '냉장고', '안쪽', category: '기타');
   await add('세탁세제', '1층', '욕실', '세탁기', '하단', qty: 3, category: '수도');
+}
+
+/// 테스트용 엑셀 파일 바이트를 만든다.
+List<int> _buildXlsx(List<List<String>> rows) {
+  final excel = Excel.createExcel();
+  final sheet = excel['Sheet1'];
+  for (var r = 0; r < rows.length; r++) {
+    for (var c = 0; c < rows[r].length; c++) {
+      sheet
+          .cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r))
+          .value = TextCellValue(rows[r][c]);
+    }
+  }
+  return excel.encode() ?? [];
 }
 
 void main() {
@@ -529,5 +545,48 @@ void main() {
     // 마스터(드롭다운) 목록은 교체 후에도 유지된다
     expect(await db.masterNames('floor'), contains('2층'));
     expect(await db.masterNames('item'), contains('에어컨 필터'));
+  });
+
+  test('11 엑셀 가져오기: 품목과 장소1이 있는 행만 등록', () async {
+    final bytes = _buildXlsx([
+      kExcelHeaders,
+      ['생수', '기타', '2', '2027-12-31', '리필용', '1층', '주방', '팬트리', '바닥'],
+      ['', '기타', '1', '', '', '1층', '주방', '', ''], // 품목 없음 → 제외
+      ['휴지', '생활', '3', '', '', '2층', '', '', ''], // 장소1 없음 → 제외
+      ['세제', '생활', '1', '', '', '', '욕실', '', ''], // 정상 등록
+    ]);
+
+    final result = await ExcelService.importFromBytes(
+      bytes,
+      sourceName: 'ndokhak_udiso_test.xlsx',
+      sourcePath: '/tmp/ndokhak_udiso_test.xlsx',
+    );
+
+    expect(result.inserted, 2);
+    expect(result.errors.any((e) => e.contains('품목이 비어')), isTrue);
+    expect(result.errors.any((e) => e.contains('장소1이 비어')), isTrue);
+    expect(result.sourceName, 'ndokhak_udiso_test.xlsx');
+    expect(result.sourcePath, '/tmp/ndokhak_udiso_test.xlsx');
+
+    final items = await DatabaseHelper.instance.searchItems();
+    expect(items.map((e) => e.itemName).toSet(), {'생수', '세제'});
+    expect(items.every((e) => e.placeLarge.isNotEmpty), isTrue);
+  });
+
+  test('12 엑셀 가져오기: 유효한 행이 없으면 기존 정보 유지', () async {
+    await _seedItems();
+    expect(await DatabaseHelper.instance.countItems(), 3);
+
+    final bytes = _buildXlsx([
+      kExcelHeaders,
+      ['', '', '', '', '', '', '', '', ''],
+      ['품목만있음', '', '1', '', '', '', '', '', ''],
+    ]);
+
+    final result = await ExcelService.importFromBytes(bytes);
+
+    expect(result.inserted, 0);
+    expect(result.errors.first, contains('기존 정보를 유지'));
+    expect(await DatabaseHelper.instance.countItems(), 3);
   });
 }

@@ -15,15 +15,21 @@
 - 선택 모드 일괄수정/일괄삭제
 - sqflite 로컬 DB, 드롭다운 항목(층·장소·분류·품목) 자동 관리
 
-### 엑셀 파일 저장 위치
+### 엑셀 파일 저장/선택 위치
 
-양식 받기/내보내기는 별도 위치 선택 없이 앱 전용 폴더에 저장하고, 저장된
-**파일명과 실제 경로**를 스낵바로 알려 준다. 파일명은 `ndokhak_udiso_`로
+양식 받기/내보내기는 기본적으로 스마트폰에서 바로 볼 수 있는 **다운로드**
+폴더에 저장하고, 저장된 **파일명과 실제 경로**를 스낵바로 알려 준다.
+스낵바의 **`다른 폴더`** 버튼을 누르면 시스템 저장 대화상자가 열려 원하는
+위치를 고를 수 있다 (기본 위치는 다운로드). 파일명은 `ndokhak_udiso_`로
 시작한다.
 
 - 양식: `ndokhak_udiso_template.xlsx`
 - 내보내기: `ndokhak_udiso_<yyyyMMdd_HHmmss>.xlsx`
-- 저장 폴더(Android): `/storage/emulated/0/Android/data/com.example.whereis/files/udiso`
+- 기본 저장 폴더(Android): `/storage/emulated/0/Download`
+  - Android 10 이상은 MediaStore를 사용하므로 저장소 권한이 필요 없다.
+  - Android 10 미만이거나 저장에 실패하면 시스템 저장 대화상자(SAF)로
+    대체하며, 이때 경로는 문서 URI로 표시된다.
+- 엑셀 가져오기 파일 선택 창도 **다운로드** 폴더에서 시작한다.
 
 ## 개발 환경
 
