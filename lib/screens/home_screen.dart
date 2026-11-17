@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../db/database_helper.dart';
 import '../models/inventory_item.dart';
 import '../services/excel_service.dart';
+import '../services/photo_backup_service.dart';
 import '../services/photo_service.dart';
 import '../utils/error_utils.dart';
 import '../utils/format.dart';
@@ -181,8 +182,8 @@ class _HomeScreenState extends State<HomeScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const ListTile(
-              title: Text('일괄등록 (엑셀)'),
-              subtitle: Text('양식 파일을 받거나, 작성한 엑셀 파일을 가져옵니다'),
+              title: Text('일괄등록 · 백업 (엑셀/사진)'),
+              subtitle: Text('엑셀 양식·가져오기, 사진 백업·복원'),
             ),
             const Divider(height: 1),
             ListTile(
@@ -195,6 +196,17 @@ class _HomeScreenState extends State<HomeScreen> {
               title: const Text('엑셀 파일 가져오기'),
               onTap: () => Navigator.of(ctx).pop('import'),
             ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('사진 파일 내보내기 (백업)'),
+              onTap: () => Navigator.of(ctx).pop('photo_export'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_backup_restore),
+              title: const Text('사진 파일 가져오기 (복원)'),
+              onTap: () => Navigator.of(ctx).pop('photo_import'),
+            ),
           ],
         ),
       ),
@@ -204,18 +216,70 @@ class _HomeScreenState extends State<HomeScreen> {
       await _saveTemplate();
       return;
     }
+    if (action == 'photo_export') {
+      await _exportPhotos();
+      return;
+    }
+    if (action == 'photo_import') {
+      await _importPhotos();
+      return;
+    }
     await _importExcel();
   }
 
   /// 엑셀 양식 파일을 저장한다. [chooseFolder]가 true면 저장 위치를 고른다.
-  Future<void> _saveTemplate({bool chooseFolder = false}) => _saveExcelFile(
+  Future<void> _saveTemplate({bool chooseFolder = false}) => _saveFile(
         '양식',
         () => ExcelService.exportTemplate(chooseFolder: chooseFolder),
         onChooseFolder: () => _saveTemplate(chooseFolder: true),
       );
 
-  /// 엑셀 양식 파일 저장 결과를 알려 준다.
-  Future<void> _saveExcelFile(
+  /// 사진 전체를 zip 파일로 내보낸다(백업).
+  Future<void> _exportPhotos({bool chooseFolder = false}) => _saveFile(
+        '사진 백업',
+        () => PhotoBackupService.exportPhotos(chooseFolder: chooseFolder),
+        onChooseFolder: () => _exportPhotos(chooseFolder: true),
+      );
+
+  /// 사진 백업 파일(.zip)을 가져와 복원한다.
+  Future<void> _importPhotos() async {
+    try {
+      final result = await PhotoBackupService.importPhotos();
+      if (!mounted) return;
+      if (result.restored == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('사진 가져오기가 취소되었습니다')));
+        return;
+      }
+      final source =
+          result.sourceName == null ? '' : '\n\n파일명: ${result.sourceName}';
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('사진 복원 결과'),
+          content: Text(
+            '${result.restored}장의 사진을 복원했습니다.$source\n\n'
+            '이제 엑셀 파일을 가져오면 복원한 사진이 자동으로 연결됩니다.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('확인'),
+            ),
+          ],
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('사진 가져오기 실패: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('사진 가져오기 실패: ${errorText(e)}')));
+      }
+    }
+  }
+
+  /// 파일 저장 결과를 알려 준다.
+  Future<void> _saveFile(
     String label,
     Future<SavedFile?> Function() run, {
     required VoidCallback onChooseFolder,
@@ -360,7 +424,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// 전체 물품을 엑셀로 내보낸다. [chooseFolder]가 true면 저장 위치를 고른다.
-  Future<void> _exportExcel({bool chooseFolder = false}) => _saveExcelFile(
+  Future<void> _exportExcel({bool chooseFolder = false}) => _saveFile(
         '내보내기',
         () => ExcelService.exportAll(chooseFolder: chooseFolder),
         onChooseFolder: () => _exportExcel(chooseFolder: true),

@@ -30,7 +30,7 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "saveToDownloads" -> saveToDownloads(call, result)
-                    "pickExcelFile" -> pickExcelFile(result)
+                    "pickFile" -> pickFile(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -60,7 +60,7 @@ class MainActivity : FlutterActivity() {
     private fun writeToDownloads(name: String, bytes: ByteArray): String {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, XLSX_MIME)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeTypeFor(name))
             put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
         }
         val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
@@ -78,16 +78,22 @@ class MainActivity : FlutterActivity() {
         return File(dir, savedName).absolutePath
     }
 
-    /** '다운로드' 폴더에서 시작하는 엑셀 파일 선택 창을 연다. */
-    private fun pickExcelFile(result: MethodChannel.Result) {
+    /** '다운로드' 폴더에서 시작하는 파일 선택 창을 연다. */
+    private fun pickFile(call: MethodCall, result: MethodChannel.Result) {
         if (pendingPickResult != null) {
             result.error("already_active", "이미 파일 선택이 진행 중입니다", null)
             return
         }
+        val types = call.argument<List<String>>("mimeTypes")
+            ?.filter { it.isNotBlank() }
+            .orEmpty()
+        val primaryType = types.firstOrNull() ?: "*/*"
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = XLSX_MIME
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(XLSX_MIME, LEGACY_XLS_MIME))
+            type = primaryType
+            if (types.size > 1) {
+                putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 putExtra(DocumentsContract.EXTRA_INITIAL_URI, Uri.parse(DOWNLOADS_ROOT_URI))
             }
@@ -126,6 +132,16 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /** 저장할 파일 이름의 확장자에 맞는 MIME 형식을 돌려준다. */
+    private fun mimeTypeFor(name: String): String =
+        when (name.substringAfterLast('.', "").lowercase()) {
+            "zip" -> ZIP_MIME
+            "xls" -> LEGACY_XLS_MIME
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            else -> XLSX_MIME
+        }
+
     private fun displayName(uri: Uri): String? {
         contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { cursor ->
@@ -143,7 +159,8 @@ class MainActivity : FlutterActivity() {
         private const val XLSX_MIME =
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         private const val LEGACY_XLS_MIME = "application/vnd.ms-excel"
-        private const val DEFAULT_FILE_NAME = "import.xlsx"
+        private const val ZIP_MIME = "application/zip"
+        private const val DEFAULT_FILE_NAME = "file"
 
         /** 안드로이드 파일 선택 창의 '다운로드' 폴더 문서 URI */
         private const val DOWNLOADS_ROOT_URI =

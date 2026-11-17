@@ -73,6 +73,33 @@ class PhotoService {
     } catch (_) {}
   }
 
+  /// 앱 사진 폴더에 있는 모든 사진 파일 (이름 순)
+  static Future<List<File>> allPhotos() async {
+    final dir = await _photoDir();
+    final files = <File>[];
+    await for (final entry in dir.list()) {
+      if (entry is File) files.add(entry);
+    }
+    files.sort((a, b) => a.path.compareTo(b.path));
+    return files;
+  }
+
+  /// 사진 폴더에 [fileName] 이름으로 저장한다 (같은 이름은 덮어씀).
+  static Future<String> savePhotoBytes(String fileName, List<int> bytes) async {
+    final dir = await _photoDir();
+    final file = File(p.join(dir.path, p.basename(fileName)));
+    await file.writeAsBytes(bytes, flush: true);
+    return file.path;
+  }
+
+  /// 사진 폴더에서 [fileName] 이름의 사진 경로를 찾는다 (없으면 null).
+  static Future<String?> findByFileName(String fileName) async {
+    if (fileName.isEmpty) return null;
+    final dir = await _photoDir();
+    final file = File(p.join(dir.path, p.basename(fileName)));
+    return await file.exists() ? file.path : null;
+  }
+
   /// 구글렌즈 등 외부 앱으로 사진을 열어 품목을 식별할 수 있게 공유
   static Future<void> shareForIdentification(String path) async {
     await SharePlus.instance.share(

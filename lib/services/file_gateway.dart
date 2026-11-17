@@ -31,14 +31,19 @@ class FileGateway {
     }
   }
 
-  /// '다운로드' 폴더에서 시작하는 엑셀 파일 선택 창을 연다.
+  /// '다운로드' 폴더에서 시작하는 파일 선택 창을 연다.
+  /// [mimeTypes]를 주면 그 형식의 파일만 고를 수 있다.
   /// 사용자가 취소하면 null을 돌려준다.
-  static Future<PickedFile?> pickExcelFile() async {
-    final map = await _channel.invokeMapMethod<String, dynamic>('pickExcelFile');
+  static Future<PickedFile?> pickFile({
+    List<String> mimeTypes = const [],
+  }) async {
+    final map = await _channel.invokeMapMethod<String, dynamic>('pickFile', {
+      'mimeTypes': mimeTypes,
+    });
     if (map == null) return null;
     final raw = map['bytes'];
     return PickedFile(
-      name: (map['name'] as String?) ?? 'import.xlsx',
+      name: (map['name'] as String?) ?? 'file',
       bytes: raw is Uint8List
           ? raw
           : Uint8List.fromList((raw as List<dynamic>).cast<int>()),

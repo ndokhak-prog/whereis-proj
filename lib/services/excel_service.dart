@@ -1,17 +1,21 @@
 import 'dart:io';
 
 import 'package:excel/excel.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import '../db/database_helper.dart';
 import '../models/inventory_item.dart';
 import '../utils/format.dart';
-import 'file_gateway.dart';
+import 'file_io.dart';
 import 'photo_service.dart';
+
+export 'file_io.dart' show SavedFile;
+
+/// 엑셀(.xlsx) 파일 형식
+const kXlsxMime =
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 const kExcelHeaders = [
   '품목',
@@ -26,9 +30,6 @@ const kExcelHeaders = [
   '사진경로',
   '사진파일명',
 ];
-
-/// 저장된 엑셀 파일 정보 (실제 파일 경로 + 파일명)
-typedef SavedFile = ({String path, String name});
 
 /// 엑셀 파일 자체의 문제(형식 오류 등)를 사용자에게 알리기 위한 예외
 class ExcelImportException implements Exception {
@@ -81,27 +82,9 @@ class ExcelService {
     List<List<dynamic>> rows,
     String fileName, {
     bool chooseFolder = false,
-  }) async {
-    final bytes = _encodeWorkbook(rows);
-
-    if (!chooseFolder) {
-      // 안드로이드: MediaStore로 '다운로드' 폴더에 바로 저장 (저장소 권한 불필요)
-      final path = await FileGateway.saveToDownloads(fileName, bytes);
-      if (path != null) return (path: path, name: p.basename(path));
-    }
-
-    // 그 외 환경이거나 저장에 실패한 경우: 시스템 저장 대화상자(SAF)를 띄운다.
-    final saved = await FilePicker.saveFile(
-      dialogTitle: '저장 위치 선택 (기본: 다운로드)',
-      fileName: fileName,
-      initialDirectory:
-          Platform.isAndroid ? FileGateway.downloadsDocumentsUri : null,
-      type: FileType.custom,
-      allowedExtensions: const ['xlsx'],
-      bytes: Uint8List.fromList(bytes),
-    );
-    if (saved == null) return null; // 사용자가 저장을 취소
-    return (path: readableLocation(saved), name: fileName);
+  }) {
+    return FileIo.saveBytes(_encodeWorkbook(rows), fileName,
+        chooseFolder: chooseFolder);
   }
 
   static Future<SavedFile?> exportTemplate({bool chooseFolder = false}) async {
@@ -145,40 +128,16 @@ class ExcelService {
   /// 그 외 환경에서는 file_picker를 사용한다.
   /// 사용자가 취소하면 빈 결과(inserted 0, errors 없음)를 돌려준다.
   static Future<ImportResult> importFromPicker() async {
-    try {
-      final picked = await FileGateway.pickExcelFile();
-      if (picked == null) {
-        return const ImportResult(inserted: 0, errors: []); // 사용자가 취소
-      }
-      return importFromBytes(picked.bytes,
-          sourceName: picked.name, sourcePath: picked.location);
-    } on MissingPluginException {
-      // 네이티브 채널이 없는 환경(데스크톱/테스트)에서는 file_picker 사용
-    } on PlatformException catch (e) {
-      debugPrint('파일 선택 실패: $e');
-      throw ExcelImportException(e.message ?? '파일을 선택할 수 없습니다');
-    }
-
-    final picked = await FilePicker.pickFiles(
+    final picked = await FileIo.pickFile(
+      mimeTypes: const [kXlsxMime, 'application/vnd.ms-excel'],
+      extensions: const ['xlsx'],
       dialogTitle: '엑셀 파일 선택',
-      type: FileType.custom,
-      allowedExtensions: ['xlsx'],
     );
-    final pickedFile = picked?.files.single;
-    final path = pickedFile?.path;
-    if (path == null) {
+    if (picked == null) {
       return const ImportResult(inserted: 0, errors: []); // 사용자가 취소
     }
-
-    final List<int> bytes;
-    try {
-      bytes = await File(path).readAsBytes();
-    } catch (e) {
-      debugPrint('엑셀 파일 읽기 실패: $e');
-      throw const ExcelImportException('선택한 파일을 읽을 수 없습니다');
-    }
-    return importFromBytes(bytes,
-        sourceName: pickedFile?.name ?? p.basename(path), sourcePath: path);
+    return importFromBytes(picked.bytes,
+        sourceName: picked.name, sourcePath: picked.location);
   }
 
   /// 엑셀 내용(바이트)으로 기존 물품을 모두 교체한다.
@@ -242,9 +201,16 @@ class ExcelService {
 
         final now = DateTime.now().millisecondsSinceEpoch;
         // 사진은 엑셀에 적힌 경로가 이 기기에 실제로 있을 때만 연결한다.
+        // 경로가 없어도 파일명이 앱 사진 폴더에 있으면 그 사진을 연결한다.
         final photoRaw = cell(9);
-        final photoPath = _existingPhoto(photoRaw);
-        if (photoRaw.isNotEmpty && photoPath == null) photoMissing++;
+        final photoName = cell(10);
+        var photoPath = _existingPhoto(photoRaw);
+        if (photoPath == null && photoName.isNotEmpty) {
+          photoPath = await PhotoService.findByFileName(photoName);
+        }
+        if (photoPath == null && (photoRaw.isNotEmpty || photoName.isNotEmpty)) {
+          photoMissing++;
+        }
         items.add(InventoryItem(
           itemName: name,
           category: cell(1),

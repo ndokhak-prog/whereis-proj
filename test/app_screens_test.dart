@@ -10,8 +10,13 @@ import 'package:whereis/db/database_helper.dart';
 import 'package:whereis/main.dart';
 import 'package:whereis/models/inventory_item.dart';
 import 'package:whereis/services/excel_service.dart';
+import 'package:whereis/services/photo_backup_service.dart';
+import 'package:whereis/services/photo_service.dart';
 
 const _materialFonts = r'C:\tools\flutter\bin\cache\artifacts\material_fonts';
+
+/// 테스트에서 쓰는 앱 문서 폴더(사진 폴더의 부모). setUp에서 매번 새로 만든다.
+late Directory _docsDir;
 
 Future<void> _loadFamily(String family, String filePath) async {
   final bytes = await File(filePath).readAsBytes();
@@ -150,6 +155,24 @@ void main() {
       await databaseFactory.deleteDatabase(path);
     }
     await DatabaseHelper.instance.countItems();
+
+    // path_provider(앱 문서 폴더)를 임시 폴더로 바꾼다. 사진 폴더가 이 안에 생긴다.
+    _docsDir = await Directory.systemTemp.createTemp('udiso_docs');
+    const pathProviderChannel = MethodChannel('plugins.flutter.io/path_provider');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(pathProviderChannel, (call) async {
+      if (call.method == 'getApplicationDocumentsDirectory') {
+        return _docsDir.path;
+      }
+      return null;
+    });
+    addTearDown(() async {
+      messenger.setMockMethodCallHandler(pathProviderChannel, null);
+      if (await _docsDir.exists()) {
+        await _docsDir.delete(recursive: true);
+      }
+    });
   });
 
   testWidgets('01 홈 초기 화면', (tester) async {
@@ -396,6 +419,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('엑셀 양식 파일 받기'), findsOneWidget);
     expect(find.text('엑셀 파일 가져오기'), findsOneWidget);
+    expect(find.text('사진 파일 내보내기 (백업)'), findsOneWidget);
+    expect(find.text('사진 파일 가져오기 (복원)'), findsOneWidget);
     await _golden(tester, '12_import_sheet');
 
     // 교체 모드: 주의 대화상자에서 취소하면 기존 정보가 유지된다
@@ -616,5 +641,64 @@ void main() {
         items.firstWhere((e) => e.itemName == '사진없음').photoPath, isNull);
 
     await dir.delete(recursive: true);
+  });
+
+  test('14 사진 백업(zip) 내보내기·복원', () async {
+    final photos = Directory(p.join(_docsDir.path, 'photos'))
+      ..createSync(recursive: true);
+    File(p.join(photos.path, 'photo_a.jpg')).writeAsBytesSync([1, 2, 3]);
+    File(p.join(photos.path, 'photo_b.jpg')).writeAsBytesSync([4, 5, 6]);
+
+    final zip = await PhotoBackupService.buildPhotoZip();
+    expect(zip, isNotEmpty);
+
+    // 사진을 모두 지운 뒤(앱 재설치 상황) 백업 파일에서 복원한다
+    photos.deleteSync(recursive: true);
+    expect(await PhotoService.allPhotos(), isEmpty);
+
+    final restored = await PhotoBackupService.restorePhotoZip(zip);
+    expect(restored, 2);
+    expect(File(p.join(photos.path, 'photo_a.jpg')).readAsBytesSync(),
+        [1, 2, 3]);
+    expect(File(p.join(photos.path, 'photo_b.jpg')).readAsBytesSync(),
+        [4, 5, 6]);
+
+    // zip이 아니면 사용자에게 알릴 수 있는 예외를 던진다
+    await expectLater(
+      PhotoBackupService.restorePhotoZip([1, 2, 3, 4]),
+      throwsA(isA<PhotoBackupException>()),
+    );
+  });
+
+  test('15 엑셀 가져오기: 사진 파일명으로 사진 연결', () async {
+    final photos = Directory(p.join(_docsDir.path, 'photos'))
+      ..createSync(recursive: true);
+    File(p.join(photos.path, 'photo_c.jpg')).writeAsBytesSync([7, 8, 9]);
+
+    // 경로는 다른 기기에서 만든 값이라 없지만, 파일명은 앱 사진 폴더에 있다
+    final bytes = _buildXlsx([
+      kExcelHeaders,
+      [
+        '파일명연결',
+        '기타',
+        '1',
+        '',
+        '',
+        '1층',
+        '주방',
+        '',
+        '',
+        '/old/device/photo_c.jpg',
+        'photo_c.jpg',
+      ],
+    ]);
+
+    final result = await ExcelService.importFromBytes(bytes);
+
+    expect(result.inserted, 1);
+    expect(result.photoMissing, 0); // 파일명으로 찾았으므로 사진 없음이 아니다
+
+    final items = await DatabaseHelper.instance.searchItems();
+    expect(items.single.photoPath, p.join(photos.path, 'photo_c.jpg'));
   });
 }
