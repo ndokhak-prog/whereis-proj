@@ -25,6 +25,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _keywordController = TextEditingController();
+  final _keywordFocus = FocusNode();
+  final _searchButtonFocus = FocusNode();
 
   _SearchMode _mode = _SearchMode.all;
 
@@ -56,6 +58,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _keywordController.dispose();
+    _keywordFocus.dispose();
+    _searchButtonFocus.dispose();
     super.dispose();
   }
 
@@ -105,6 +109,18 @@ class _HomeScreenState extends State<HomeScreen> {
       _selectMode = false;
       _selectedIds.clear();
     });
+  }
+
+  /// 검색을 실행한다.
+  ///
+  /// 키워드 모드에서 찾기 버튼을 누르면(또는 키보드의 검색 키를 누르면) 커서를
+  /// 찾기 버튼으로 옮기고 하단 키보드를 내린다. 키워드 칸을 다시 누르면
+  /// [onTap]에서 포커스를 되돌려 키보드가 다시 올라오도록 한다.
+  void _runSearch() {
+    _search();
+    if (_mode != _SearchMode.keyword) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    _searchButtonFocus.requestFocus();
   }
 
   Future<void> _openEdit([InventoryItem? item]) async {
@@ -574,17 +590,26 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (_mode == _SearchMode.keyword)
                   TextField(
                     controller: _keywordController,
+                    focusNode: _keywordFocus,
+                    onTap: () {
+                      // 찾기 버튼으로 커서가 옮겨간 뒤 다시 선택하면 키보드가
+                      // 올라오도록 포커스를 키워드 칸으로 되돌린다.
+                      if (!_keywordFocus.hasFocus) {
+                        _keywordFocus.requestFocus();
+                      }
+                    },
                     decoration: const InputDecoration(
                       labelText: '키워드',
                       hintText: '모든 항목에서 검색 (예: 1층, 발코니, 필터)',
                       prefixIcon: Icon(Icons.search),
                     ),
                     textInputAction: TextInputAction.search,
-                    onSubmitted: (_) => _search(),
+                    onSubmitted: (_) => _runSearch(),
                   ),
                 const SizedBox(height: 12),
                 FilledButton.icon(
-                  onPressed: _search,
+                  focusNode: _searchButtonFocus,
+                  onPressed: _runSearch,
                   icon: const Icon(Icons.search),
                   label: Text(_mode == _SearchMode.all ? '전체 조회' : '찾기'),
                 ),

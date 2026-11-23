@@ -701,4 +701,46 @@ void main() {
     final items = await DatabaseHelper.instance.searchItems();
     expect(items.single.photoPath, p.join(photos.path, 'photo_c.jpg'));
   });
+
+  testWidgets('16 키워드 찾기 후 포커스 이동·키보드 숨김', (tester) async {
+    await _seedItems();
+    await _pumpApp(tester);
+
+    await tester.tap(find.text('키워드'));
+    await tester.pumpAndSettle();
+
+    final field = find.byType(TextField);
+    final editable = tester.widget<EditableText>(
+      find.descendant(of: field, matching: find.byType(EditableText)),
+    );
+    expect(editable.focusNode.hasFocus, isFalse);
+
+    // 키워드 칸을 누르면 포커스(키보드 표시)
+    await tester.tap(field);
+    await tester.pumpAndSettle();
+    expect(editable.focusNode.hasFocus, isTrue);
+
+    await tester.enterText(field, '김치');
+    await tester.pumpAndSettle();
+
+    // 찾기 버튼을 누르면 커서가 버튼으로 옮겨가고 키보드가 내려간다
+    await tester.tap(_btn('찾기'));
+    await tester.pumpAndSettle();
+    expect(editable.focusNode.hasFocus, isFalse);
+    expect(
+      find.ancestor(
+        of: find.text('찾기'),
+        matching: find.byWidgetPredicate(
+          (w) => w is Focus && w.focusNode == FocusManager.instance.primaryFocus,
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('김치'), findsWidgets);
+
+    // 키워드 칸을 다시 누르면 포커스(키보드 표시)가 돌아온다
+    await tester.tap(field);
+    await tester.pumpAndSettle();
+    expect(editable.focusNode.hasFocus, isTrue);
+  });
 }
